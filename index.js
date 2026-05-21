@@ -1,26 +1,27 @@
 const { Telegraf } = require('telegraf');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 if (!BOT_TOKEN || !GEMINI_API_KEY) {
-    console.error("❌ Ошибка: Проверьте переменные BOT_TOKEN и GEMINI_API_KEY на хостинге!");
+    console.error("❌ Ошибка: Укажите BOT_TOKEN и GEMINI_API_KEY в настройках хостинга!");
     process.exit(1);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const SYSTEM_INSTRUCTION = `
-Ты — умный ИИ-ассистент, встроенный в личный Telegram-аккаунт твоего владельца. 
-Твоя задача — отвечать на входящие сообщения от других людей от его имени.
-Отвечай кратко, емко, дружелюбно. Не используй длинные робо-вступления.
-Если спрашивают о личной встрече или деталях, пиши, что владелец скоро освободится и ответит сам.
+Ты — умный ИИ-ассистент в личном Telegram-аккаунте. 
+Твоя задача — отвечать на входящие сообщения от других людей. 
+Отвечай кратко, дружелюбно, без лишних вступлений. 
+Если тебя спрашивают о чем-то личном или о встрече, напиши, что владелец ответит позже.
 `;
 
 bot.on('business_connection', (ctx) => {
-    console.log(`[+] Бот активен для бизнес-сессии.`);
+    console.log(`[+] Бот подключен к аккаунту.`);
 });
 
 bot.on('business_message', async (ctx) => {
@@ -28,60 +29,38 @@ bot.on('business_message', async (ctx) => {
     const connectionId = msg.business_connection_id;
     const text = msg.text;
 
-    // 1. Проверяем, что пришел именно текст
-    if (!text) return;
+    // Игнорируем не-текстовые сообщения и наши собственные исходящие
+    if (!text || msg.out) return;
 
-    // 2. ЗАЩИТА ОТ САМООТВЕТА:
-    // Флаг msg.from.id — это тот, кто физически нажал "отправить".
-    // Если этот ID совпадает с ID чата, куда отправлено (saved messages), 
-    // или если это сообщение является ИСХОДЯЩИМ от твоего лица (проверяем через служебные поля Telegram),
-    // то бот должен промолчать.
-    if (msg.from.id === msg.chat.id || msg.chat.type !== 'private') {
-        return; 
-    }
-
-    // Дополнительная проверка: если в объекте сообщения есть пометка, что оно исходящее от нас
-    if (msg.out) {
-        console.log("ℹ️ Пропускаем наше собственное исходящее сообщение.");
-        return;
-    }
-
-    console.log(`[Входящее от пользователя ${msg.from.first_name} (ID: ${msg.from.id})]: ${text}`);
+    console.log(`[Входящее от ${msg.from.first_name}]: ${text}`);
 
     try {
-        // Показываем статус "печатает..." в чате собеседника
+        // Уведомляем Telegram, что мы "печатаем"
         await ctx.telegram.sendChatAction(msg.chat.id, 'typing');
 
-        // Запрос к ИИ Gemini
-        const response = await ai.models.generateContent({
-            model: 'gemini-1.5-flash',
-            contents: text,
-            config: {
-                systemInstruction: SYSTEM_INSTRUCTION,
-                temperature: 0.7 
-            }
+        // Генерируем ответ через Gemini
+        const result = await model.generateContent({
+            contents: [{ role: "user", parts: [{ text: text }] }],
+            systemInstruction: SYSTEM_INSTRUCTION,
+            generationConfig: { temperature: 0.7 }
         });
 
-        const aiReply = response.text;
+        const aiReply = result.response.text();
 
         if (aiReply) {
-            // Отправляем ответ в ID чата, где идет беседа
             await ctx.telegram.sendMessage(
                 msg.chat.id, 
                 aiReply,
                 { business_connection_id: connectionId }
             );
-            console.log(`[Ответ ИИ успешно отправлен]: ${aiReply}`);
+            console.log(`[Ответ отправлен]: ${aiReply}`);
         }
-
     } catch (error) {
-        console.error("❌ Ошибка при отправке ИИ-ответа:", error);
+        console.error("❌ Ошибка:", error.message);
     }
 });
 
-bot.launch().then(() => {
-    console.log('🚀 Бот-секретарь с ИИ успешно обновлен на BotHost!');
-});
+bot.launch().then(() => console.log('🚀 Бот запущен!'));
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
