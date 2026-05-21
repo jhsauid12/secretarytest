@@ -1,49 +1,67 @@
 const { Telegraf } = require('telegraf');
-const { GoogleGenAI } = require('@google/genai');
+const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY
-});
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
-// 🔥 100% доступная модель для твоего ключа
-const MODEL = "gemini-1.5-pro";
+if (!DEEPSEEK_API_KEY) {
+    console.error("❌ Нет DEEPSEEK_API_KEY в env");
+    process.exit(1);
+}
 
-bot.catch(console.error);
+// 🧠 функция запроса к DeepSeek
+async function askDeepSeek(text) {
+    const response = await axios.post(
+        'https://api.deepseek.com/chat/completions',
+        {
+            model: "deepseek-chat",
+            messages: [
+                {
+                    role: "system",
+                    content: "Ты умный, краткий и полезный ассистент."
+                },
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            temperature: 0.7
+        },
+        {
+            headers: {
+                "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
+                "Content-Type": "application/json"
+            }
+        }
+    );
 
-bot.on('business_message', async (ctx) => {
+    return response.data.choices[0].message.content;
+}
+
+// 💬 обработка сообщений
+bot.on('message', async (ctx) => {
     try {
-        const msg = ctx.businessMessage || ctx.update.business_message;
-        if (!msg) return;
-
-        const connectionId = msg.business_connection_id;
-        if (!connectionId) return;
-
-        const text = msg.text || msg.caption;
+        const text = ctx.message.text;
         if (!text) return;
 
         console.log("[IN]", text);
 
-        const result = await ai.models.generateContent({
-            model: MODEL,
-            contents: text
-        });
+        await ctx.sendChatAction('typing');
 
-        const reply = result.text;
+        const reply = await askDeepSeek(text);
 
-        await ctx.telegram.sendMessage(
-            msg.chat.id,
-            reply,
-            { business_connection_id: connectionId }
-        );
-
-        console.log("✅ Sent");
+        await ctx.reply(reply);
 
     } catch (err) {
-        console.error("❌ Error:", err);
+        console.error("❌ Error:", err.response?.data || err.message);
+        ctx.reply("Ошибка при запросе к ИИ 😔");
     }
 });
 
-bot.launch();
-console.log("🚀 Bot running stable (Pro model)");
+bot.launch().then(() => {
+    console.log("🚀 DeepSeek bot started");
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
