@@ -1,29 +1,17 @@
 const { Telegraf } = require('telegraf');
 const { GoogleGenAI } = require('@google/genai');
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const bot = new Telegraf(process.env.BOT_TOKEN);
 
-if (!BOT_TOKEN || !GEMINI_API_KEY) {
-    console.error("❌ Missing BOT_TOKEN or GEMINI_API_KEY");
-    process.exit(1);
-}
-
-const bot = new Telegraf(BOT_TOKEN);
-
-// 🔥 Новый стабильный SDK
 const ai = new GoogleGenAI({
-    apiKey: GEMINI_API_KEY
+    apiKey: process.env.GEMINI_API_KEY
 });
 
-// 🔥 СТАБИЛЬНАЯ БЕСПЛАТНАЯ МОДЕЛЬ
-const MODEL = "gemini-1.5-flash";
+// 🔥 100% доступная модель для твоего ключа
+const MODEL = "gemini-1.5-pro";
 
-bot.catch((err) => {
-    console.error("❌ Telegraf error:", err);
-});
+bot.catch(console.error);
 
-// 💬 Business messages handler
 bot.on('business_message', async (ctx) => {
     try {
         const msg = ctx.businessMessage || ctx.update.business_message;
@@ -35,9 +23,8 @@ bot.on('business_message', async (ctx) => {
         const text = msg.text || msg.caption;
         if (!text) return;
 
-        console.log(`[IN] ${text}`);
+        console.log("[IN]", text);
 
-        // 🧠 Gemini request
         const result = await ai.models.generateContent({
             model: MODEL,
             contents: text
@@ -45,27 +32,18 @@ bot.on('business_message', async (ctx) => {
 
         const reply = result.text;
 
-        if (!reply) return;
-
-        // 📤 send response
         await ctx.telegram.sendMessage(
             msg.chat.id,
             reply,
-            {
-                business_connection_id: connectionId
-            }
+            { business_connection_id: connectionId }
         );
 
         console.log("✅ Sent");
 
     } catch (err) {
-        console.error("❌ Runtime error:", err);
+        console.error("❌ Error:", err);
     }
 });
 
-bot.launch().then(() => {
-    console.log("🚀 Bot started successfully");
-});
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+bot.launch();
+console.log("🚀 Bot running stable (Pro model)");
